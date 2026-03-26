@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>上傳尿布疹照片</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .upload-card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .upload-icon {
+            font-size: 64px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .liff-status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .liff-ok {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .liff-err {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .spinner-border-sm {
+            width: 1rem;
+            height: 1rem;
+            border-width: 0.15em;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="upload-card">
+        <div class="upload-icon">🩹</div>
+        <h2 class="text-center mb-4">上傳尿布疹照片</h2>
+        <p class="text-center text-muted mb-4">請填寫以下資訊以獲取 AI 分析</p>
+
+        <!-- LIFF 狀態指示 -->
+        <div id="liffStatus" class="liff-status" style="display:none;"></div>
+
+        <form id="uploadForm" action="/submit_case" method="post" enctype="multipart/form-data">
+
+            <!-- LIFF User ID（隱藏欄位，由 LIFF SDK 自動填入） -->
+            <input type="hidden" name="line_user_id" id="line_user_id">
+
+            <div class="mb-3">
+                <label for="name" class="form-label">家長/監護人姓名</label>
+                <input type="text" class="form-control" id="name" name="name" required placeholder="請輸入您的姓名">
+            </div>
+
+            <div class="mb-3">
+                <label for="phone" class="form-label">電話號碼</label>
+                <input type="tel" class="form-control" id="phone" name="phone" required placeholder="例如 0912345678">
+            </div>
+
+            <div class="mb-4">
+                <label for="image" class="form-label">患部照片</label>
+                <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
+                <small class="text-muted">JPG、PNG 格式，最大 8MB</small>
+            </div>
+
+            <div class="d-grid">
+                <button type="submit" id="submitBtn" class="btn btn-primary btn-lg btn-submit">
+                    提交進行分析
+                </button>
+            </div>
+        </form>
+
+        <div class="text-center mt-4">
+            <small class="text-muted">
+                您的隱私受到保護。影像將在安全環境中進行分析。
+            </small>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- LINE LIFF SDK -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+    <script>
+        // ============================
+        // LIFF 初始化：自動取得 LINE User ID
+        // ============================
+        // 由後端環境變數 LIFF_ID 注入
+        var LIFF_ID = "{{ liff_id or '' }}";
+
+        (function initLiff() {
+            var statusEl = document.getElementById("liffStatus");
+            if (!LIFF_ID) {
+                statusEl.textContent = "系統尚未設定 LIFF_ID，請聯繫管理員。";
+                statusEl.className = "liff-status liff-err";
+                statusEl.style.display = "block";
+                return;
+            }
+
+            liff.init({ liffId: LIFF_ID })
+                .then(function () {
+                    if (!liff.isLoggedIn()) {
+                        // 未登入則導向 LINE 登入
+                        liff.login();
+                        return;
+                    }
+                    return liff.getProfile();
+                })
+                .then(function (profile) {
+                    if (profile && profile.userId) {
+                        document.getElementById("line_user_id").value = profile.userId;
+                        statusEl.textContent = "已成功連結 LINE 帳號";
+                        statusEl.className = "liff-status liff-ok";
+                        statusEl.style.display = "block";
+                    }
+                })
+                .catch(function (err) {
+                    console.error("LIFF init error:", err);
+                    statusEl.textContent = "LINE 連結失敗，請嘗試重新開啟此頁面";
+                    statusEl.className = "liff-status liff-err";
+                    statusEl.style.display = "block";
+                });
+        })();
+
+        // ============================
+        // 防抖機制：防止重複提交
+        // ============================
+        (function setupDebounce() {
+            var form = document.getElementById("uploadForm");
+            var btn = document.getElementById("submitBtn");
+            var submitted = false;
+
+            form.addEventListener("submit", function (e) {
+                // 防止重複提交
+                if (submitted) {
+                    e.preventDefault();
+                    return;
+                }
+
+                // 檢查 line_user_id 是否已取得
+                var lineUserId = document.getElementById("line_user_id").value;
+                if (!lineUserId) {
+                    e.preventDefault();
+                    alert("尚未取得 LINE 帳號資訊，請確認您是從 LINE 應用程式中開啟此頁面。");
+                    return;
+                }
+
+                submitted = true;
+                btn.disabled = true;
+                btn.innerHTML =
+                    '<span class="spinner-border spinner-border-sm me-2" role="status"></span>提交中，請稍候...';
+            });
+        })();
+    </script>
+
+</body>
+
+</html>

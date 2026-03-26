@@ -1,0 +1,13 @@
+# Python cache/bytecode
+__pycache__/
+*.py[cod]
+
+# Local environment files (do not bake secrets into image)
+.env
+.env.*
+
+# Runtime/generated service data (must come from mounted volume)
+storage/
+
+# Local lock files
+*.lock
