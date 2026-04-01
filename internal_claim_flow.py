@@ -1,6 +1,7 @@
 import base64
 import os
 import re
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException
 
@@ -26,6 +27,8 @@ def claim_case_workflow_impl(
     max_claim_image_bytes: int,
     update_stub_fields,
     status_processing: str,
+    save_json_atomic,
+    processing_lease_timeout_sec: int,
 ) -> dict:
     verify_internal_signature(request, b"")
     for _ in range(5):
@@ -98,6 +101,28 @@ def claim_case_workflow_impl(
                 message="Invalid case data",
                 processing_json_path=dest_path,
                 record=record,
+            )
+
+        # Lease/heartbeat metadata: cleanup must not purge active processing jobs.
+        now = datetime.now()
+        heartbeat_at = now.isoformat(timespec="seconds")
+        lease_expires_at = (now + timedelta(seconds=max(60, processing_lease_timeout_sec))).isoformat(
+            timespec="seconds"
+        )
+        record["claimed_at"] = heartbeat_at
+        record["last_heartbeat_at"] = heartbeat_at
+        record["lease_expires_at"] = lease_expires_at
+        try:
+            save_json_atomic(dest_path, record)
+        except Exception as e:
+            return purge_case_files(
+                case_id=case_id,
+                note="processing_lease_init_failed",
+                message="Case lease init failed",
+                receipt=receipt,
+                processing_json_path=dest_path,
+                record=record,
+                exc=e,
             )
 
         image_filename = (record.get("image_filename") or "").strip()

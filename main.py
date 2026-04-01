@@ -14,6 +14,61 @@ logger = logging.getLogger("external")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CLEANUP_LOCK_PATH = os.path.join(BASE_DIR, ".cleanup_worker.lock")
 RUN_CLEANUP_WORKER = os.getenv("RUN_CLEANUP_WORKER", "1").strip() == "1"
+REQUIRE_CLEANUP_WORKER = os.getenv("REQUIRE_CLEANUP_WORKER", "1").strip() == "1"
+FILE_QUEUE_SINGLE_INSTANCE_REQUIRED = os.getenv("FILE_QUEUE_SINGLE_INSTANCE_REQUIRED", "1").strip() == "1"
+REPLICA_ENV_KEYS = (
+    "CLOUD_PUBLIC_REPLICA_COUNT",
+    "ZEABUR_REPLICA_COUNT",
+    "REPLICA_COUNT",
+    "REPLICAS",
+    "INSTANCE_COUNT",
+)
+
+
+def _detect_replica_signals() -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for key in REPLICA_ENV_KEYS:
+        raw = (os.getenv(key) or "").strip()
+        if not raw:
+            continue
+        try:
+            counts[key] = int(raw)
+        except ValueError:
+            logger.warning(f"[DEPLOYMENT][WARN] Ignore non-integer replica signal {key}={raw!r}")
+    return counts
+
+
+def _enforce_file_queue_safety() -> None:
+    if REQUIRE_CLEANUP_WORKER and not RUN_CLEANUP_WORKER:
+        raise RuntimeError(
+            "Unsafe startup: RUN_CLEANUP_WORKER=0 while REQUIRE_CLEANUP_WORKER=1. "
+            "For filesystem queue mode, cleanup worker must stay enabled."
+        )
+
+    if not FILE_QUEUE_SINGLE_INSTANCE_REQUIRED:
+        logger.warning(
+            "[DEPLOYMENT][CRITICAL] FILE_QUEUE_SINGLE_INSTANCE_REQUIRED=0. "
+            "This is unsafe for local filesystem queue mode."
+        )
+        return
+
+    signals = _detect_replica_signals()
+    if not signals:
+        logger.warning(
+            "[DEPLOYMENT][CRITICAL] File queue uses local disk and cannot verify replica count automatically. "
+            "You MUST deploy exactly one cloud_public replica. "
+            "Set CLOUD_PUBLIC_REPLICA_COUNT=1 to make this explicit."
+        )
+        return
+
+    replica_count = max(signals.values())
+    if replica_count > 1:
+        raise RuntimeError(
+            "Unsafe deployment: cloud_public file queue requires single instance (replica=1). "
+            f"Detected replica signals={signals}. Multi-instance causes queue split."
+        )
+    if replica_count <= 0:
+        raise RuntimeError(f"Invalid replica count detected: {signals}")
 
 
 def _is_process_alive(pid: int) -> bool:
@@ -52,6 +107,7 @@ def _is_process_alive(pid: int) -> bool:
 async def lifespan(app: FastAPI):
     cleanup_thread = None
     lock_fd = None
+    _enforce_file_queue_safety()
 
     def _acquire_lock(path: str):
         try:
@@ -86,9 +142,12 @@ async def lifespan(app: FastAPI):
             cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
             cleanup_thread.start()
         else:
-            logger.warning("[CLEANUP] Skip cleanup worker startup: lock already held by another process")
+            logger.warning(
+                "[CLEANUP] Skip cleanup worker startup: lock already held by another process. "
+                "Confirm another worker in the same filesystem is active."
+            )
     else:
-        logger.info("[CLEANUP] RUN_CLEANUP_WORKER=0, cleanup worker disabled")
+        logger.warning("[CLEANUP] RUN_CLEANUP_WORKER=0, cleanup worker disabled")
     try:
         yield
     finally:

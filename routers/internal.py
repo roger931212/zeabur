@@ -11,6 +11,7 @@ from internal_workflow_service import (
     abort_case_workflow,
     claim_case_workflow,
     confirm_case_workflow,
+    heartbeat_case_workflow,
     read_signed_payload,
     update_ai_result_workflow,
 )
@@ -86,6 +87,15 @@ async def confirm_case(
 ):
     payload = await read_signed_payload(request, ReceiptPayload)
     return confirm_case_workflow(payload)
+
+
+@router.post("/heartbeat_case")
+async def heartbeat_case(
+    request: Request,
+    x_api_key: str = Depends(verify_internal_key),
+):
+    payload = await read_signed_payload(request, ReceiptPayload)
+    return heartbeat_case_workflow(payload)
 
 
 @router.post("/update_ai_result")

@@ -19,7 +19,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 RESULT_RATE_LIMIT = int(os.getenv("RESULT_RATE_LIMIT", "120"))
 RESULT_RATE_WINDOW_SEC = int(os.getenv("RESULT_RATE_WINDOW_SEC", "600"))
-LIFF_ID = os.getenv("LIFF_ID", "").strip()
+LIFF_ID = os.getenv("LIFF_ID", "2009418786-6d3ngp64").strip()
 DUP_WINDOW_SEC = int(os.getenv("DUP_WINDOW_SEC", "90"))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 RECEIPT_COOKIE_MAX_AGE_SEC = int(os.getenv("RECEIPT_COOKIE_MAX_AGE_SEC", "1800"))
@@ -165,7 +165,8 @@ async def submit_case(
     name: str = Form(...),
     phone: str = Form(...),
     image: UploadFile = File(...),
-    line_user_id: str = Form(...),
+    liff_id_token: str = Form(...),
+    liff_access_token: str = Form(...),
 ):
     # CSRF check
     _check_csrf(request)
@@ -174,7 +175,8 @@ async def submit_case(
         name=name,
         phone=phone,
         image=image,
-        line_user_id=line_user_id,
+        liff_id_token=liff_id_token,
+        liff_access_token=liff_access_token,
         is_recent_duplicate=_is_recent_duplicate,
     )
 

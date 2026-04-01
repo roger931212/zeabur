@@ -48,7 +48,22 @@ INTERNAL_RATE_WINDOW_SEC = int(os.getenv("INTERNAL_RATE_WINDOW_SEC", "600"))
 # Duplicate submission window (seconds)
 DUP_WINDOW_SEC = int(os.getenv("DUP_WINDOW_SEC", "90"))
 
-LIFF_ID = os.getenv("LIFF_ID", "").strip()
+LIFF_ID = os.getenv("LIFF_ID", "2009418786-6d3ngp64").strip()
+LINE_LOGIN_CHANNEL_ID = os.getenv("LINE_LOGIN_CHANNEL_ID", "").strip()
+if not LINE_LOGIN_CHANNEL_ID:
+    raise RuntimeError("LINE_LOGIN_CHANNEL_ID is required")
+try:
+    LINE_API_TIMEOUT_SEC = max(1.0, float(os.getenv("LINE_API_TIMEOUT_SEC", "10")))
+except Exception:
+    LINE_API_TIMEOUT_SEC = 10.0
+LINE_ID_TOKEN_VERIFY_URL = os.getenv(
+    "LINE_ID_TOKEN_VERIFY_URL",
+    "https://api.line.me/oauth2/v2.1/verify",
+).strip()
+LINE_PROFILE_API_URL = os.getenv(
+    "LINE_PROFILE_API_URL",
+    "https://api.line.me/v2/profile",
+).strip()
 
 # Public base URL for CSRF origin validation (P1-5).
 # This is the cloud_public service's own public URL, NOT the edge service URL.

@@ -8,7 +8,7 @@ This module intentionally centralizes `/claim_case`, `/confirm_case`,
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Type
 
 from fastapi import HTTPException, Request
@@ -50,6 +50,7 @@ from utils_paths import (
     pending_path,
     processing_path,
     resolve_upload_path_safe,
+    save_json_atomic,
     safe_read_file_limited,
     stub_path,
 )
@@ -57,6 +58,9 @@ from utils_security import receipt_matches, verify_internal_signature
 from utils_stub import normalize_stub_payload, update_stub_fields
 
 MAX_CLAIM_IMAGE_BYTES = int(os.getenv("MAX_CLAIM_IMAGE_BYTES", str(8 * 1024 * 1024)))
+PROCESSING_LEASE_TIMEOUT_SEC = int(os.getenv("PROCESSING_LEASE_TIMEOUT_SEC", "900"))
+
+
 async def read_signed_payload(request: Request, model: Type[BaseModel]) -> BaseModel:
     raw_body = await request.body()
     verify_internal_signature(request, raw_body)
@@ -147,7 +151,35 @@ def claim_case_workflow(request: Request) -> dict:
         max_claim_image_bytes=MAX_CLAIM_IMAGE_BYTES,
         update_stub_fields=update_stub_fields,
         status_processing=STATUS_PROCESSING,
+        save_json_atomic=save_json_atomic,
+        processing_lease_timeout_sec=PROCESSING_LEASE_TIMEOUT_SEC,
     )
+
+
+def heartbeat_case_workflow(payload) -> dict:
+    case_id = normalize_case_id(payload.case_id)
+    receipt = payload.receipt
+    proc = processing_path(case_id)
+
+    if not os.path.exists(proc):
+        # Idempotent heartbeat: if processing payload is gone, confirm caller still owns case context.
+        _verify_stub_receipt(case_id, receipt)
+        return {"status": "ok", "message": "processing_missing"}
+
+    record = load_json(proc)
+    if not receipt_matches(receipt, record.get("receipt")):
+        raise HTTPException(status_code=403, detail="Receipt mismatch")
+
+    now = datetime.now()
+    now_iso = now.isoformat(timespec="seconds")
+    record.setdefault("claimed_at", now_iso)
+    record["last_heartbeat_at"] = now_iso
+    record["lease_expires_at"] = (now + timedelta(seconds=max(60, PROCESSING_LEASE_TIMEOUT_SEC))).isoformat(
+        timespec="seconds"
+    )
+    save_json_atomic(proc, record)
+
+    return {"status": "ok"}
 
 
 def confirm_case_workflow(payload) -> dict:

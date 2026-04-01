@@ -10,13 +10,13 @@ from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
 
 from constants import PRIVACY_SAFE_RETRY_MESSAGE, log_zero_retention_error, safe_file_size, safe_remove
+from line_login_service import verify_liff_identity
 from utils_paths import pending_path, save_json_atomic, stub_path, upload_path
 from utils_rate_limit import _rate_check
 from utils_security import get_client_ip
 from utils_stub import create_stub
 from utils_validation import (
     detect_image_ext_from_magic,
-    validate_line_user_id,
     validate_phone,
     validate_upload_content_type,
 )
@@ -51,7 +51,13 @@ def _enforce_submit_rate_limit(request: Request) -> None:
         raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
 
 
-def _normalize_submit_meta(name: str, phone: str, line_user_id: str, image: UploadFile) -> SubmitMeta:
+def _normalize_submit_meta(
+    name: str,
+    phone: str,
+    image: UploadFile,
+    liff_id_token: str,
+    liff_access_token: str,
+) -> SubmitMeta:
     normalized_name = (name or "").strip()
     if not normalized_name:
         raise HTTPException(status_code=400, detail="Name is required")
@@ -59,9 +65,12 @@ def _normalize_submit_meta(name: str, phone: str, line_user_id: str, image: Uplo
         normalized_name = normalized_name[:MAX_NAME_CHARS]
 
     phone_digits = validate_phone(phone)
-    normalized_line_user_id = validate_line_user_id(line_user_id)
     if not validate_upload_content_type(image.content_type):
         raise HTTPException(status_code=400, detail="Invalid image content type")
+    normalized_line_user_id = verify_liff_identity(
+        liff_id_token=liff_id_token,
+        liff_access_token=liff_access_token,
+    )
 
     return SubmitMeta(
         case_id=str(uuid.uuid4()),
@@ -186,11 +195,18 @@ async def submit_case_workflow(
     name: str,
     phone: str,
     image: UploadFile,
-    line_user_id: str,
+    liff_id_token: str,
+    liff_access_token: str,
     is_recent_duplicate: Callable[[str, float], bool],
 ) -> RedirectResponse:
     _enforce_submit_rate_limit(request)
-    meta = _normalize_submit_meta(name, phone, line_user_id, image)
+    meta = _normalize_submit_meta(
+        name=name,
+        phone=phone,
+        image=image,
+        liff_id_token=liff_id_token,
+        liff_access_token=liff_access_token,
+    )
 
     upload_result = UploadResult(image_filename="", final_img_path="", tmp_path="", fingerprint="")
     tmp_path = upload_path(f"{meta.case_id}.upload")
